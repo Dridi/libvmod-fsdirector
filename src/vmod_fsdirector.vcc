@@ -1,0 +1,6 @@
+Module fsdirector
+
+Object file_system() {
+	Method BACKEND .backend()
+}
+

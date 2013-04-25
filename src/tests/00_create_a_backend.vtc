@@ -1,0 +1,21 @@
+varnishtest "Test file_system director"
+
+varnish v1 -vcl {
+	import fsdirector from "${vmod_topbuild}/src/.libs/libvmod_fsdirector.so" ;
+
+	backend dummy {
+		.host = "127.0.0.1";
+		.port = "8080";
+	}
+
+	sub vcl_init {
+		new fs = fsdirector.file_system();
+	}
+
+	sub vcl_recv {
+		set req.backend = fs.backend();
+	}
+} -start
+
+varnish v1 -wait
+

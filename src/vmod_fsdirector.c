@@ -39,6 +39,7 @@
 #include "vre.h"
 #include "vrt.h"
 #include "vas.h"
+#include "vss.h"
 #include "vbm.h"
 
 #include "cache/cache.h"
@@ -46,15 +47,57 @@
 
 #include "vcc_if.h"
 
+static bgthread_t server_bgthread;
+
 struct vmod_fsdirector_file_system {
 	unsigned                 magic;
-#define VMOD_FSDIRECTOR_MAGIC    0x00000000
+#define VMOD_FSDIRECTOR_MAGIC    0x00000000 // TODO pick a magic
 	pthread_mutex_t          mtx;
 	VCL_BACKEND              *backend;
 	struct director          *dir;
 	struct vbitmap           *vbm;
-	/* TODO store pthread */
+	int                      sock;
+	struct vss_addr          **vss_addr;
+	pthread_t                tp;
+	struct worker            *wrk;
 };
+
+static void *
+server_bgthread(struct worker *wrk, void *priv)
+{
+	struct vmod_fsdirector_file_system *fs;
+	struct sockaddr_storage addr_s;
+	socklen_t len;
+	int fd;
+
+	CAST_OBJ_NOTNULL(fs, priv, VMOD_FSDIRECTOR_MAGIC);
+	assert(fs->sock >= 0);
+
+	while (true) {
+		do {
+			fd = accept(fs->sock, (void*)&addr_s, &len);
+		} while (fd < 0 && errno == EAGAIN);
+
+	}
+
+	pthread_exit(0);
+
+	NEEDLESS_RETURN(NULL);
+}
+
+static void
+server_start(struct vmod_fsdirector_file_system *fs)
+{
+	int naddr;
+
+	CHECK_OBJ_NOTNULL(fs, VMOD_FSDIRECTOR_MAGIC);
+
+	naddr = VSS_resolve("127.0.0.1", "0", &fs->vss_addr);
+	fs->sock = VSS_listen(fs->vss_addr[0], 10); /* XXX hardcoded depth */
+	assert(fs->sock >= 0);
+
+	WRK_BgThread(&fs->tp, "fsdirector-", server_bgthread, fs);
+}
 
 VCL_VOID
 vmod_file_system__init(struct req *req, struct vmod_fsdirector_file_system **fsp,
@@ -70,7 +113,7 @@ vmod_file_system__init(struct req *req, struct vmod_fsdirector_file_system **fsp
 	AN(fs);
 	*fsp = fs;
 
-	/* TODO create pthread */
+	server_start(fs);
 
 	AZ(pthread_mutex_init(&fs->mtx, NULL));
 	ALLOC_OBJ(fs->dir, DIRECTOR_MAGIC);
@@ -87,6 +130,11 @@ VCL_VOID
 vmod_file_system__fini(struct req *req, struct vmod_fsdirector_file_system **fsp)
 {
 	struct vmod_fsdirector_file_system *fs;
+	void *res;
+
+	// XXX It seems like the destructor is not called yet.
+	//     A little reminder then...
+	abort();
 
 	AZ(req);
 	fs = *fsp;
@@ -98,7 +146,9 @@ vmod_file_system__fini(struct req *req, struct vmod_fsdirector_file_system **fsp
 	FREE_OBJ(fs->dir);
 	vbit_destroy(fs->vbm);
 
-	/* TODO kill pthread */
+	AZ(pthread_cancel(fs->tp));
+	AZ(pthread_join(fs->tp, &res));
+	assert(res == PTHREAD_CANCELED);
 
 	FREE_OBJ(fs);
 }

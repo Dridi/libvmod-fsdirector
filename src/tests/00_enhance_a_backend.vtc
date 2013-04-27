@@ -1,4 +1,4 @@
-varnishtest "Test the file_system director"
+varnishtest "Enhance a backend"
 
 varnish v1 -vcl {
 	import fsdirector from "${vmod_topbuild}/src/.libs/libvmod_fsdirector.so" ;

@@ -80,22 +80,68 @@ struct vmod_fsdirector_file_system {
         struct worker            *wrk;
 };
 
+static void
+answer_bad_request(struct http_conn *htc)
+{
+	char *response =
+	    "HTTP/1.1 400 Bad Request\r\n"
+	    "Connection: close;\r\n"
+	    "\r\n";
+	write(htc->fd, response, strlen(response));
+}
+
+static void
+answer_appropriate(struct http_conn *htc)
+{
+	char *response =
+	    "HTTP/1.1 204 No Content\r\n"
+	    "Connection: close;\r\n"
+	    "\r\n";
+	write(htc->fd, response, strlen(response));
+}
+
 static void *
 server_bgthread(struct worker *wrk, void *priv)
 {
 	struct vmod_fsdirector_file_system *fs;
 	struct sockaddr_storage addr_s;
+	struct http_conn htc;
 	socklen_t len;
 	int fd;
+	enum htc_status_e htc_status;
 
 	CAST_OBJ_NOTNULL(fs, priv, VMOD_FSDIRECTOR_MAGIC);
 	assert(fs->sock >= 0);
+
+	fs->wrk = wrk; // XXX hardcoded size for malloc
+	WS_Init(wrk->aws, "fsworkspace-", malloc(4096*1024), 4096*1024);
 
 	while (1) {
 		do {
 			fd = accept(fs->sock, (void*)&addr_s, &len);
 		} while (fd < 0 && errno == EAGAIN);
 
+		if (fd < 0) {
+			continue;
+		}
+
+		HTTP1_Init(&htc, wrk->aws, fd, NULL, 2048*1024, 20); // XXX hardcoded
+
+		htc_status = HTTP1_Rx(&htc);
+		switch (htc_status) {
+			case HTTP1_OVERFLOW:
+			case HTTP1_ERROR_EOF:
+			case HTTP1_ALL_WHITESPACE:
+			case HTTP1_NEED_MORE:
+				answer_bad_request(&htc);
+				break;
+			case HTTP1_COMPLETE:
+				answer_appropriate(&htc);
+				break;
+		}
+
+		WS_Reset(wrk->aws, NULL);
+		close(fd);
 	}
 
 	pthread_exit(0);
@@ -165,6 +211,8 @@ vmod_file_system__fini(struct req *req, struct vmod_fsdirector_file_system **fsp
 	AZ(pthread_join(fs->tp, &res));
 	assert(res == PTHREAD_CANCELED);
 
+	free(fs->wrk->aws);
+	FREE_OBJ(fs->wrk);
 	FREE_OBJ(fs);
 }
 

@@ -19,6 +19,6 @@ varnish v1 -cliok "param.set first_byte_timeout 1"
 client c1 {
 	txreq
 	rxresp
-	expect resp.status == 503
+	expect resp.status == 204
 } -run
 

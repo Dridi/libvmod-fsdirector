@@ -49,16 +49,30 @@
 
 #include "vcc_if.h"
 
+/*--------------------------------------------------------------------
+ * Stolen from bin/varnishd/cache/cache_backend.c
+ */
+
+static
+struct vdi_simple {
+        unsigned                magic;
+#define VDI_SIMPLE_MAGIC        0x476d25b7
+        struct director         dir;
+        struct backend          *backend;
+        const struct vrt_backend *vrt;
+};
+
+/*--------------------------------------------------------------------*/
+
 static bgthread_t server_bgthread;
 
 struct vmod_fsdirector_file_system {
         unsigned                 magic;
 #define VMOD_FSDIRECTOR_MAGIC    0x00000000 // TODO pick a magic
-        struct director          *dir;
+        struct vdi_simple        *vs;
         struct vbitmap           *vbm;
         int                      sock;
         struct vss_addr          **vss_addr;
-        struct vrt_backend       be;
         char                     port[6];
         char                     sockaddr_size;
         struct sockaddr_in       sockaddr;
@@ -92,30 +106,15 @@ server_bgthread(struct worker *wrk, void *priv)
 static void
 server_start(struct vmod_fsdirector_file_system *fs)
 {
-	CHECK_OBJ_NOTNULL(fs, VMOD_FSDIRECTOR_MAGIC);
+	struct vdi_simple *vs;
+	const struct vrt_backend *be;
 
-	AN(VSS_resolve("127.0.0.1", "0", &fs->vss_addr));
-	fs->sock = VSS_listen(fs->vss_addr[0], 10); /* XXX hardcoded depth */
+	vs = fs->vs;
+	be = vs->vrt;
+
+	AN(VSS_resolve(be->ipv4_addr, be->port, &fs->vss_addr));
+	fs->sock = VSS_listen(fs->vss_addr[0], be->max_connections);
 	assert(fs->sock >= 0);
-
-	socklen_t len = sizeof(struct sockaddr_in);
-	AZ(getsockname(fs->sock, (struct sockaddr *)&fs->sockaddr, &len));
-	snprintf(fs->port, 6, "%hu", ntohs(fs->sockaddr.sin_port));
-
-	/* TODO append an id to the backend name */
-	fs->sockaddr_size = sizeof(struct sockaddr_in);
-	fs->be.vcl_name = "fsbackend-";
-	fs->be.ipv4_addr = "127.0.0.1";
-	fs->be.ipv4_sockaddr = (char*)&fs->sockaddr_size; /* XXX ugly hack... */
-	fs->be.port = fs->port;
-	fs->be.hosthdr = "127.0.0.1";
-	fs->be.max_connections = 10; /* XXX hardcoded depth */
-	fs->be.saintmode_threshold = -1;
-
-	VRT_init_dir_simple(NULL, &fs->dir, 0, &fs->be);
-
-	/* TODO append an id to the director name */
-	fs->dir->name = "fsdirector-";
 
 	/* TODO append an id to the thread name */
 	WRK_BgThread(&fs->tp, "fsthread-", server_bgthread, fs);
@@ -123,17 +122,21 @@ server_start(struct vmod_fsdirector_file_system *fs)
 
 VCL_VOID
 vmod_file_system__init(struct req *req, struct vmod_fsdirector_file_system **fsp,
-    const char *vcl_name)
+    const char *vcl_name, VCL_BACKEND be)
 {
 	struct vmod_fsdirector_file_system *fs;
+	struct vdi_simple *vs;
 
 	AZ(req);
 	AN(fsp);
 	AN(vcl_name);
 	AZ(*fsp);
+	CHECK_OBJ_NOTNULL(be, DIRECTOR_MAGIC);
+	CAST_OBJ_NOTNULL(vs, be->priv, VDI_SIMPLE_MAGIC);
 	ALLOC_OBJ(fs, VMOD_FSDIRECTOR_MAGIC);
 	AN(fs);
 	*fsp = fs;
+	fs->vs = vs;
 
 	fs->vbm = vbit_init(8);
 	AN(fs->vbm);
@@ -163,12 +166,5 @@ vmod_file_system__fini(struct req *req, struct vmod_fsdirector_file_system **fsp
 	assert(res == PTHREAD_CANCELED);
 
 	FREE_OBJ(fs);
-}
-
-VCL_BACKEND
-vmod_file_system_backend(struct req *req, struct vmod_fsdirector_file_system *fs)
-{
-	CHECK_OBJ_NOTNULL(fs, VMOD_FSDIRECTOR_MAGIC);
-	return (fs->dir);
 }
 

@@ -1,6 +1,5 @@
 Module fsdirector
 
-Object file_system() {
-	Method BACKEND .backend()
+Object file_system(BACKEND) {
 }
 

@@ -1,0 +1,36 @@
+varnishtest "Method not allowed"
+
+varnish v1 -vcl {
+	import fsdirector from "${vmod_topbuild}/src/.libs/libvmod_fsdirector.so" ;
+
+	backend static {
+		.host = "127.0.0.1";
+		.port = "8080";
+	}
+
+	sub vcl_init {
+		new fs = fsdirector.file_system(static);
+	}
+} -start
+
+client c1 {
+	txreq -req "PUT"
+	rxresp
+	expect resp.status == 405
+
+	txreq -req "POST"
+	rxresp
+	expect resp.status == 405
+
+	txreq -req "DELETE"
+	rxresp
+	expect resp.status == 405
+
+	# handled by varnish, the backend will receive a GET
+	txreq -req "HEAD"
+	rxresp
+	# still, not implemented :)
+	expect resp.status == 204
+
+} -run
+

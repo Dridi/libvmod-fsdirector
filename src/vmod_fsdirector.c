@@ -97,6 +97,14 @@ answer_appropriate(struct http_conn *htc)
 	    "HTTP/1.1 204 No Content\r\n"
 	    "Connection: close;\r\n"
 	    "\r\n";
+
+	if (strncmp("GET ", htc->ws->s, 4)) {
+		response =
+		    "HTTP/1.1 405 Method Not Allowed\r\n"
+		    "Connection: close;\r\n"
+		    "\r\n";
+	}
+
 	write(htc->fd, response, strlen(response));
 }
 

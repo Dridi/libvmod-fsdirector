@@ -14,23 +14,22 @@ varnish v1 -vcl {
 } -start
 
 client c1 {
-	txreq -req "PUT"
+	txreq -req "PUT" -url "${vmod_topbuild}/src/tests/www/index.html"
 	rxresp
 	expect resp.status == 405
 
-	txreq -req "POST"
+	txreq -req "POST" -url "${vmod_topbuild}/src/tests/www/index.html"
 	rxresp
 	expect resp.status == 405
 
-	txreq -req "DELETE"
+	txreq -req "DELETE" -url "${vmod_topbuild}/src/tests/www/index.html"
 	rxresp
 	expect resp.status == 405
 
 	# handled by varnish, the backend will receive a GET
-	txreq -req "HEAD"
+	txreq -req "HEAD" -url "${vmod_topbuild}/src/tests/www/index.html"
 	rxresp
 	# still, not implemented :)
-	expect resp.status == 204
-
+	expect resp.status == 503
 } -run
 

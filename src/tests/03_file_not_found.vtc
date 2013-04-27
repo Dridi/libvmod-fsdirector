@@ -1,4 +1,4 @@
-varnishtest "Request a file"
+varnishtest "File Not Found"
 
 varnish v1 -vcl {
 	import fsdirector from "${vmod_topbuild}/src/.libs/libvmod_fsdirector.so" ;
@@ -14,9 +14,8 @@ varnish v1 -vcl {
 } -start
 
 client c1 {
-	txreq -url "${vmod_topbuild}/src/tests/www/index.html"
+	txreq -url "${vmod_topbuild}/src/tests/www/index.htm"
 	rxresp
-	# XXX not implemented yet :)
-	expect resp.status == 503
+	expect resp.status == 404
 } -run
 

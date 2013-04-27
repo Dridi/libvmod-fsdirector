@@ -35,6 +35,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <netinet/in.h> // XXX autoheader that
 
 #include "vre.h"
@@ -81,31 +84,90 @@ struct vmod_fsdirector_file_system {
 };
 
 static void
-answer_bad_request(struct http_conn *htc)
+prepare_answer(struct http_conn *htc, int status)
 {
-	char *response =
-	    "HTTP/1.1 400 Bad Request\r\n"
-	    "Connection: close;\r\n"
-	    "\r\n";
-	write(htc->fd, response, strlen(response));
+	char *message;
+
+	switch (status) {
+		case 200: message = "OK";                 break;
+		case 204: message = "No Content";         break;
+		case 400: message = "Bad Request";        break;
+		case 403: message = "Forbidden";          break;
+		case 404: message = "Not Found";          break;
+		case 405: message = "Method Not Allowed"; break;
+		default:
+			status = 500;
+			message = "Internal Error";
+	}
+
+	dprintf(htc->fd, "HTTP/1.1 %d %s\r\n", status, message);
+	dprintf(htc->fd, "Connection: close\r\n");
+}
+
+static void
+prepare_body(struct http_conn *htc, const char *content_type)
+{
+	if (content_type) {
+		// TODO handle content type
+	}
+	dprintf(htc->fd, "\r\n");
+}
+
+static void
+handle_stat_error(struct http_conn *htc, int err) {
+	int status;
+
+	switch (err) {
+		case EACCES:
+			status = 403;
+			break;
+		case ENAMETOOLONG:
+		case EFAULT:
+			status = 400;
+			break;
+		case ENOENT:
+		case ENOTDIR:
+			status = 404;
+			break;
+		default:
+			status = 500;
+	}
+
+	prepare_answer(htc, status);
+	prepare_body(htc, NULL);
 }
 
 static void
 answer_appropriate(struct http_conn *htc)
 {
-	char *response =
-	    "HTTP/1.1 204 No Content\r\n"
-	    "Connection: close;\r\n"
-	    "\r\n";
+	unsigned available;
+	char *url;
+	char *url_start;
+	char *url_end;
+	size_t url_len;
+	char *path;
+	struct stat stat_buf;
 
 	if (strncmp("GET ", htc->ws->s, 4)) {
-		response =
-		    "HTTP/1.1 405 Method Not Allowed\r\n"
-		    "Connection: close;\r\n"
-		    "\r\n";
+		prepare_answer(htc, 405);
+		prepare_body(htc, NULL);
+		return;
 	}
 
-	write(htc->fd, response, strlen(response));
+	url_start = &htc->ws->s[4];
+	url_end = strchr(url_start, ' ');
+	url_len = url_end - url_start;
+	url = WS_Alloc(htc->ws, url_len + 1);
+	memcpy(url, url_start, url_len + 1);
+	url[url_len] = '\0';
+
+	path = url;
+	if (stat(path, &stat_buf) < 0) {
+		handle_stat_error(htc, errno);
+		return;
+	}
+
+	// TODO handle file
 }
 
 static void *
@@ -141,7 +203,8 @@ server_bgthread(struct worker *wrk, void *priv)
 			case HTTP1_ERROR_EOF:
 			case HTTP1_ALL_WHITESPACE:
 			case HTTP1_NEED_MORE:
-				answer_bad_request(&htc);
+				prepare_answer(&htc, 400);
+				prepare_body(&htc, NULL);
 				break;
 			case HTTP1_COMPLETE:
 				answer_appropriate(&htc);

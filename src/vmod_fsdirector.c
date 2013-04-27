@@ -31,16 +31,18 @@
  */
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
-#include <stdbool.h>
+#include <netinet/in.h> // XXX autoheader that
 
 #include "vre.h"
 #include "vrt.h"
 #include "vas.h"
 #include "vss.h"
 #include "vbm.h"
+#include "vtcp.h"
 
 #include "cache/cache.h"
 #include "cache/cache_backend.h"
@@ -50,16 +52,18 @@
 static bgthread_t server_bgthread;
 
 struct vmod_fsdirector_file_system {
-	unsigned                 magic;
+        unsigned                 magic;
 #define VMOD_FSDIRECTOR_MAGIC    0x00000000 // TODO pick a magic
-	pthread_mutex_t          mtx;
-	VCL_BACKEND              *backend;
-	struct director          *dir;
-	struct vbitmap           *vbm;
-	int                      sock;
-	struct vss_addr          **vss_addr;
-	pthread_t                tp;
-	struct worker            *wrk;
+        struct director          *dir;
+        struct vbitmap           *vbm;
+        int                      sock;
+        struct vss_addr          **vss_addr;
+        struct vrt_backend       be;
+        char                     port[6];
+        char                     sockaddr_size;
+        struct sockaddr_in       sockaddr;
+        pthread_t                tp;
+        struct worker            *wrk;
 };
 
 static void *
@@ -73,7 +77,7 @@ server_bgthread(struct worker *wrk, void *priv)
 	CAST_OBJ_NOTNULL(fs, priv, VMOD_FSDIRECTOR_MAGIC);
 	assert(fs->sock >= 0);
 
-	while (true) {
+	while (1) {
 		do {
 			fd = accept(fs->sock, (void*)&addr_s, &len);
 		} while (fd < 0 && errno == EAGAIN);
@@ -88,15 +92,33 @@ server_bgthread(struct worker *wrk, void *priv)
 static void
 server_start(struct vmod_fsdirector_file_system *fs)
 {
-	int naddr;
-
 	CHECK_OBJ_NOTNULL(fs, VMOD_FSDIRECTOR_MAGIC);
 
-	naddr = VSS_resolve("127.0.0.1", "0", &fs->vss_addr);
+	AN(VSS_resolve("127.0.0.1", "0", &fs->vss_addr));
 	fs->sock = VSS_listen(fs->vss_addr[0], 10); /* XXX hardcoded depth */
 	assert(fs->sock >= 0);
 
-	WRK_BgThread(&fs->tp, "fsdirector-", server_bgthread, fs);
+	socklen_t len = sizeof(struct sockaddr_in);
+	AZ(getsockname(fs->sock, (struct sockaddr *)&fs->sockaddr, &len));
+	snprintf(fs->port, 6, "%hu", ntohs(fs->sockaddr.sin_port));
+
+	/* TODO append an id to the backend name */
+	fs->sockaddr_size = sizeof(struct sockaddr_in);
+	fs->be.vcl_name = "fsbackend-";
+	fs->be.ipv4_addr = "127.0.0.1";
+	fs->be.ipv4_sockaddr = (char*)&fs->sockaddr_size; /* XXX ugly hack... */
+	fs->be.port = fs->port;
+	fs->be.hosthdr = "127.0.0.1";
+	fs->be.max_connections = 10; /* XXX hardcoded depth */
+	fs->be.saintmode_threshold = -1;
+
+	VRT_init_dir_simple(NULL, &fs->dir, 0, &fs->be);
+
+	/* TODO append an id to the director name */
+	fs->dir->name = "fsdirector-";
+
+	/* TODO append an id to the thread name */
+	WRK_BgThread(&fs->tp, "fsthread-", server_bgthread, fs);
 }
 
 VCL_VOID
@@ -113,17 +135,10 @@ vmod_file_system__init(struct req *req, struct vmod_fsdirector_file_system **fsp
 	AN(fs);
 	*fsp = fs;
 
-	server_start(fs);
-
-	AZ(pthread_mutex_init(&fs->mtx, NULL));
-	ALLOC_OBJ(fs->dir, DIRECTOR_MAGIC);
-	AN(fs->dir);
-	REPLACE(fs->dir->vcl_name, vcl_name);
-	// fs->dir->priv = priv;
-	// fs->dir->healthy = healthy;
-	// fs->dir->getfd = getfd;
 	fs->vbm = vbit_init(8);
 	AN(fs->vbm);
+
+	server_start(fs);
 }
 
 VCL_VOID
@@ -141,9 +156,6 @@ vmod_file_system__fini(struct req *req, struct vmod_fsdirector_file_system **fsp
 	*fsp = NULL;
 	CHECK_OBJ_NOTNULL(fs, VMOD_FSDIRECTOR_MAGIC);
 
-	free(fs->backend);
-	AZ(pthread_mutex_destroy(&fs->mtx));
-	FREE_OBJ(fs->dir);
 	vbit_destroy(fs->vbm);
 
 	AZ(pthread_cancel(fs->tp));

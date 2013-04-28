@@ -34,11 +34,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdarg.h>
+// XXX autoheader that
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/sendfile.h>
+#include <fcntl.h>
 #include <unistd.h>
-#include <netinet/in.h> // XXX autoheader that
+#include <netinet/in.h> 
 
 #include "vre.h"
 #include "vrt.h"
@@ -108,7 +110,7 @@ static void
 prepare_body(struct http_conn *htc, const char *content_type)
 {
 	if (content_type) {
-		// TODO handle content type
+		dprintf(htc->fd, "Content-Type: %s\r\n", content_type);
 	}
 	dprintf(htc->fd, "\r\n");
 }
@@ -135,6 +137,59 @@ handle_stat_error(struct http_conn *htc, int err) {
 
 	prepare_answer(htc, status);
 	prepare_body(htc, NULL);
+}
+
+static void
+send_response(struct http_conn *htc, struct stat *stat_buf, const char *path)
+{
+	int fd;
+	off_t offset = 0;
+	ssize_t remaining = stat_buf->st_size;
+	ssize_t written;
+
+	fd = open(path, O_RDONLY);
+
+	// TODO handle failure
+	assert(fd > 0);
+
+	prepare_answer(htc, 200);
+	dprintf(htc->fd, "Content-Length: %lu\r\n", stat_buf->st_size);
+	prepare_body(htc, NULL); // XXX handle content type ?
+
+	while (remaining > 0) {
+		written = sendfile(htc->fd, fd, &offset, remaining);
+		if (written < 0) {
+			perror("sendfile");
+			break;
+		}
+		remaining -= written;
+	}
+
+	// XXX too late for a 500 response...
+	close(fd);
+}
+
+static void
+answer_file(struct http_conn *htc, struct stat *stat_buf, const char *path)
+{
+	mode_t mode = stat_buf->st_mode;
+
+	if (S_ISREG(mode)) {
+		if (stat_buf->st_size) {
+			send_response(htc, stat_buf, path);
+		}
+		else {
+			prepare_answer(htc, 204);
+			prepare_body(htc, NULL);
+		}
+	}
+	else if (S_ISLNK(mode)) {
+		// TODO follow link or send redirection ?
+	}
+	else {
+		prepare_answer(htc, 404);
+		prepare_body(htc, NULL);
+	}
 }
 
 static void
@@ -167,7 +222,7 @@ answer_appropriate(struct http_conn *htc)
 		return;
 	}
 
-	// TODO handle file
+	answer_file(htc, &stat_buf, path);
 }
 
 static void *

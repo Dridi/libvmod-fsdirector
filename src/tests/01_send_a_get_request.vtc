@@ -16,7 +16,7 @@ varnish v1 -vcl {
 client c1 {
 	txreq -url "${vmod_topbuild}/src/tests/www/index.html"
 	rxresp
-	# XXX not implemented yet :)
-	expect resp.status == 503
+	expect resp.status == 200
+	expect resp.bodylen == 5
 } -run
 

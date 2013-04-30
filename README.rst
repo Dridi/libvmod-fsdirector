@@ -44,19 +44,69 @@ Varnish QueryString Module
 SYNOPSIS
 ========
 
-import fsdirector;
+..sourcecode::
+
+   import fsdirector;
 
 DESCRIPTION
 ===========
 
+With this module, you can make Varnish serve static files from your file system
+without an additional server such as Apache HTTPD. The module actually starts a
+server thread that will answer Varnish's HTTP requests with static files.
 
+This is a *play with Linux system calls and Varnish internals* Proof of Concept
+VMOD. Do I need to mention this is not suitable for production use ? You are
+warned ;)
+
+DEPENDENCIES
+============
+
+In order to build *and* run the VMOD, you will need:
+
+* Varnish 4 (just in case ;-)
+* libmagic
+
+Do not hesitate to report any missing dependency.
+
+HISTORY
+=======
+
+This VMOD was initially an attempt to create a *filesystem* director, in order
+to test backends manipulation (more precisely directors) introduced by Varnish
+4.
+
+Obviously, it failed, but instead of creating a director, I use a backend
+declared in the VCL and create a server thread with the backend's parameters.
+By the way, I try to reuse Varnish's code instead of writing my own for several
+reasons:
+
+* developer => lazy
+* it forces me to read and understand lots of code written by experienced C
+  developers
+
+There is a strong probability that the director attempt failed because I didn't
+use Varnish's internals properly. You can read the commit log to know the steps
+I go through while writing it, I'm still playing with it when I want to try
+stuff.
 
 EXAMPLE
 =======
 
-In your VCL you could then use this vmod along the following lines::
+This is very easy to use::
 
    import fsdirector;
+
+   backend static {
+      .host = "127.0.0.1";
+      .port = "8080";
+   }
+   
+   sub vcl_init {
+      new fs = fsdirector.file_system(static);
+   }
+
+See *src/tests* for more examples.
 
 COPYRIGHT
 =========

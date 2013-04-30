@@ -40,6 +40,7 @@ vmodtool = $(VARNISHSRC)/lib/libvcl/vmodtool.py
 vmod_LTLIBRARIES = libvmod_fsdirector.la
 
 libvmod_fsdirector_la_LDFLAGS = -module -export-dynamic -avoid-version
+libvmod_fsdirector_la_LIBADD = -lmagic
 
 libvmod_fsdirector_la_SOURCES = \
 	vcc_if.c \

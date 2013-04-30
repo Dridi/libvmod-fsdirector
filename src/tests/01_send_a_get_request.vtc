@@ -17,6 +17,7 @@ client c1 {
 	txreq -url "${vmod_topbuild}/src/tests/www/index.html"
 	rxresp
 	expect resp.status == 200
+	expect resp.http.Content-Type ~ "text/plain"
 	expect resp.bodylen == 5
 } -run
 

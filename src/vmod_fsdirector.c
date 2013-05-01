@@ -328,13 +328,14 @@ load_magic_cookie()
 }
 
 VCL_VOID
-vmod_file_system__init(struct req *req, struct vmod_fsdirector_file_system **fsp,
+vmod_file_system__init(const struct vrt_ctx *ctx,
+    struct vmod_fsdirector_file_system **fsp,
     const char *vcl_name, VCL_BACKEND be)
 {
 	struct vmod_fsdirector_file_system *fs;
 	struct vdi_simple *vs;
 
-	AZ(req);
+	AN(ctx);
 	AN(fsp);
 	AN(vcl_name);
 	AZ(*fsp);
@@ -357,7 +358,7 @@ vmod_file_system__init(struct req *req, struct vmod_fsdirector_file_system **fsp
 }
 
 VCL_VOID
-vmod_file_system__fini(struct req *req, struct vmod_fsdirector_file_system **fsp)
+vmod_file_system__fini(struct vmod_fsdirector_file_system **fsp)
 {
 	struct vmod_fsdirector_file_system *fs;
 	void *res;
@@ -366,7 +367,6 @@ vmod_file_system__fini(struct req *req, struct vmod_fsdirector_file_system **fsp
 	//     A little reminder then...
 	abort();
 
-	AZ(req);
 	fs = *fsp;
 	*fsp = NULL;
 	CHECK_OBJ_NOTNULL(fs, VMOD_FSDIRECTOR_MAGIC);

@@ -9,7 +9,7 @@ varnish v1 -vcl {
 	}
 
 	sub vcl_init {
-		new fs = fsdirector.file_system(static);
+		new fs = fsdirector.file_system(static, "");
 	}
 } -start
 

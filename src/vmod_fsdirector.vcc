@@ -1,5 +1,5 @@
 Module fsdirector
 
-Object file_system(BACKEND) {
+Object file_system(BACKEND, STRING) {
 }
 

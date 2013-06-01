@@ -103,7 +103,7 @@ This is very easy to use::
    }
    
    sub vcl_init {
-      new fs = fsdirector.file_system(static);
+      new fs = fsdirector.file_system(static, "/var/www");
    }
 
 See *src/tests* for more examples.

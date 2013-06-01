@@ -60,7 +60,6 @@
  * Stolen from bin/varnishd/cache/cache_backend.c
  */
 
-static
 struct vdi_simple {
         unsigned                magic;
 #define VDI_SIMPLE_MAGIC        0x476d25b7
@@ -76,6 +75,7 @@ static bgthread_t server_bgthread;
 struct vmod_fsdirector_file_system {
         unsigned                 magic;
 #define VMOD_FSDIRECTOR_MAGIC    0x00000000 // TODO pick a magic
+        const char               *root;
         struct vdi_simple        *vs;
         struct vbitmap           *vbm;
         int                      sock;
@@ -218,6 +218,7 @@ answer_appropriate(struct vmod_fsdirector_file_system *fs)
 	char *url_start;
 	char *url_end;
 	size_t url_len;
+	size_t root_len;
 	char *path;
 	struct stat stat_buf;
 
@@ -230,9 +231,11 @@ answer_appropriate(struct vmod_fsdirector_file_system *fs)
 	url_start = &fs->htc.ws->s[4];
 	url_end = strchr(url_start, ' ');
 	url_len = url_end - url_start;
-	url = WS_Alloc(fs->htc.ws, url_len + 1);
-	memcpy(url, url_start, url_len + 1);
-	url[url_len] = '\0';
+	root_len = strlen(fs->root);
+	url = WS_Alloc(fs->htc.ws, root_len + url_len + 1);
+	memcpy(url, fs->root, root_len);
+	memcpy(&url[root_len], url_start, url_len + 1);
+	url[root_len + url_len] = '\0';
 
 	path = url;
 	if (stat(path, &stat_buf) < 0) {
@@ -330,7 +333,7 @@ load_magic_cookie()
 VCL_VOID
 vmod_file_system__init(const struct vrt_ctx *ctx,
     struct vmod_fsdirector_file_system **fsp,
-    const char *vcl_name, VCL_BACKEND be)
+    const char *vcl_name, VCL_BACKEND be, const char *root)
 {
 	struct vmod_fsdirector_file_system *fs;
 	struct vdi_simple *vs;
@@ -347,6 +350,10 @@ vmod_file_system__init(const struct vrt_ctx *ctx,
 	AN(fs);
 	*fsp = fs;
 	fs->vs = vs;
+
+	AN(root);
+	assert(root[0] == '\0' || root[0] == '/');
+	fs->root = root;
 
 	fs->vbm = vbit_init(8);
 	AN(fs->vbm);

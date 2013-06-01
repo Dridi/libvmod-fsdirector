@@ -9,12 +9,12 @@ varnish v1 -vcl {
 	}
 
 	sub vcl_init {
-		new fs = fsdirector.file_system(static);
+		new fs = fsdirector.file_system(static, "${vmod_topbuild}");
 	}
 } -start
 
 client c1 {
-	txreq -url "${vmod_topbuild}/src/tests/www/index.htm"
+	txreq -url "/src/tests/www/index.htm"
 	rxresp
 	expect resp.status == 404
 } -run

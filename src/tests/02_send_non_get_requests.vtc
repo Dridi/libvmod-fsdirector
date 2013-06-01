@@ -9,25 +9,25 @@ varnish v1 -vcl {
 	}
 
 	sub vcl_init {
-		new fs = fsdirector.file_system(static);
+		new fs = fsdirector.file_system(static, "${vmod_topbuild}");
 	}
 } -start
 
 client c1 {
-	txreq -req "PUT" -url "${vmod_topbuild}/src/tests/www/index.html"
+	txreq -req "PUT" -url "/src/tests/www/index.html"
 	rxresp
 	expect resp.status == 405
 
-	txreq -req "POST" -url "${vmod_topbuild}/src/tests/www/index.html"
+	txreq -req "POST" -url "/src/tests/www/index.html"
 	rxresp
 	expect resp.status == 405
 
-	txreq -req "DELETE" -url "${vmod_topbuild}/src/tests/www/index.html"
+	txreq -req "DELETE" -url "/src/tests/www/index.html"
 	rxresp
 	expect resp.status == 405
 
 	# handled by varnish, the backend will receive a GET
-	txreq -req "HEAD" -url "${vmod_topbuild}/src/tests/www/index.html"
+	txreq -req "HEAD" -url "/src/tests/www/index.html"
 	rxresp -no_obj
 	expect resp.status == 200
 	expect resp.http.Content-Length == 5

@@ -69,10 +69,7 @@ PKG_PROG_PKG_CONFIG
 
 # Checks for header files
 AC_HEADER_STDC
-AC_CHECK_HEADERS([sys/stdlib.h])
-
-# Check for functions
-AC_CHECK_FUNCS([mempcpy])
+AC_CHECK_HEADERS([magic.h])
 
 # Check for python
 AC_CHECK_PROGS(

@@ -34,7 +34,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-// XXX autoheader that
+#include <libgen.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/sendfile.h>
@@ -48,7 +48,6 @@
 #include "vrt.h"
 #include "vas.h"
 #include "vss.h"
-#include "vbm.h"
 #include "vtcp.h"
 
 #include "cache/cache.h"
@@ -70,14 +69,15 @@ struct vdi_simple {
 
 /*--------------------------------------------------------------------*/
 
-static bgthread_t server_bgthread;
+#define WS_LEN        0x400000 // 4 MiB
+#define HTTP1_BUF     0x200000 // 2 MiB
+#define HTTP1_MAX_HDR 20
 
 struct vmod_fsdirector_file_system {
         unsigned                 magic;
-#define VMOD_FSDIRECTOR_MAGIC    0x00000000 // TODO pick a magic
+#define VMOD_FSDIRECTOR_MAGIC    0x94874A52
         const char               *root;
         struct vdi_simple        *vs;
-        struct vbitmap           *vbm;
         int                      sock;
         struct vss_addr          **vss_addr;
         char                     port[6];
@@ -87,6 +87,8 @@ struct vmod_fsdirector_file_system {
         struct worker            *wrk;
         struct http_conn         htc;
         magic_t                  magic_cookie;
+        char                     *thread_name;
+        char                     *ws_name;
 };
 
 static void
@@ -117,7 +119,7 @@ prepare_body(struct http_conn *htc)
 }
 
 static void
-handle_stat_error(struct http_conn *htc, int err) {
+handle_file_error(struct http_conn *htc, int err) {
 	int status;
 
 	switch (err) {
@@ -165,8 +167,10 @@ send_response(struct vmod_fsdirector_file_system *fs, struct stat *stat_buf,
 
 	fd = open(path, O_RDONLY);
 
-	// TODO handle failure
-	assert(fd > 0);
+	if(fd < 0) {
+		handle_file_error(&fs->htc, errno);
+		return;
+	}
 
 	prepare_answer(&fs->htc, 200);
 	dprintf(fs->htc.fd, "Content-Length: %lu\r\n", stat_buf->st_size);
@@ -239,7 +243,7 @@ answer_appropriate(struct vmod_fsdirector_file_system *fs)
 
 	path = url;
 	if (stat(path, &stat_buf) < 0) {
-		handle_stat_error(&fs->htc, errno);
+		handle_file_error(&fs->htc, errno);
 		return;
 	}
 
@@ -260,8 +264,8 @@ server_bgthread(struct worker *wrk, void *priv)
 	assert(fs->sock >= 0);
 
 	htc = &fs->htc;
-	fs->wrk = wrk; // XXX hardcoded size for malloc
-	WS_Init(wrk->aws, "fsworkspace-", malloc(4096*1024), 4096*1024);
+	fs->wrk = wrk;
+	WS_Init(wrk->aws, fs->ws_name, malloc(WS_LEN), WS_LEN);
 
 	while (1) {
 		do {
@@ -272,7 +276,7 @@ server_bgthread(struct worker *wrk, void *priv)
 			continue;
 		}
 
-		HTTP1_Init(htc, wrk->aws, fd, NULL, 2048*1024, 20); // XXX hardcoded
+		HTTP1_Init(htc, wrk->aws, fd, NULL, HTTP1_BUF, HTTP1_MAX_HDR);
 
 		htc_status = HTTP1_Rx(htc);
 		switch (htc_status) {
@@ -310,8 +314,7 @@ server_start(struct vmod_fsdirector_file_system *fs)
 	fs->sock = VSS_listen(fs->vss_addr[0], be->max_connections);
 	assert(fs->sock >= 0);
 
-	/* TODO append an id to the thread name */
-	WRK_BgThread(&fs->tp, "fsthread-", server_bgthread, fs);
+	WRK_BgThread(&fs->tp, fs->thread_name, server_bgthread, fs);
 }
 
 static magic_t
@@ -351,12 +354,18 @@ vmod_file_system__init(const struct vrt_ctx *ctx,
 	*fsp = fs;
 	fs->vs = vs;
 
+	fs->thread_name = malloc(sizeof("fsthread-")    + strlen(vcl_name));
+	fs->ws_name     = malloc(sizeof("fsworkspace-") + strlen(vcl_name));
+
+	AN(fs->thread_name);
+	AN(fs->ws_name);
+
+	sprintf(fs->thread_name, "fsthread-%s", vcl_name);
+	sprintf(fs->ws_name,  "fsworkspace-%s", vcl_name);
+
 	AN(root);
 	assert(root[0] == '\0' || root[0] == '/');
 	fs->root = root;
-
-	fs->vbm = vbit_init(8);
-	AN(fs->vbm);
 
 	fs->magic_cookie = load_magic_cookie();
 	AN(fs->magic_cookie);
@@ -378,13 +387,13 @@ vmod_file_system__fini(struct vmod_fsdirector_file_system **fsp)
 	*fsp = NULL;
 	CHECK_OBJ_NOTNULL(fs, VMOD_FSDIRECTOR_MAGIC);
 
-	vbit_destroy(fs->vbm);
-
 	AZ(pthread_cancel(fs->tp));
 	AZ(pthread_join(fs->tp, &res));
 	assert(res == PTHREAD_CANCELED);
 
 	magic_close(fs->magic_cookie);
+	free(fs->thread_name);
+	free(fs->ws_name);
 	free(fs->wrk->aws);
 	FREE_OBJ(fs->wrk);
 	FREE_OBJ(fs);

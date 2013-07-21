@@ -1,0 +1,29 @@
+varnishtest "Request a symbolic link"
+
+varnish v1 -vcl {
+	import fsdirector from "${vmod_topbuild}/src/.libs/libvmod_fsdirector.so" ;
+
+	backend static {
+		.host = "127.0.0.1";
+		.port = "8080";
+	}
+
+	sub vcl_init {
+		new fs = fsdirector.file_system(static, "${vmod_topbuild}");
+	}
+} -start
+
+client c1 {
+	txreq -url "/src/tests/www/good_relative_link"
+	rxresp
+	expect resp.status == 302
+	expect resp.http.Location == "/src/tests/www/index.html"
+
+	txreq -url "/src/tests/www/bad_relative_link"
+	rxresp
+	expect resp.status == 500
+
+	txreq -url "/src/tests/www/bad_absolute_link"
+	rxresp
+	expect resp.status == 500
+} -run

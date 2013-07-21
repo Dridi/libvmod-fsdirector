@@ -99,6 +99,7 @@ prepare_answer(struct http_conn *htc, int status)
 	switch (status) {
 		case 200: message = "OK";                 break;
 		case 204: message = "No Content";         break;
+		case 302: message = "Moved Temporarily";  break;
 		case 400: message = "Bad Request";        break;
 		case 403: message = "Forbidden";          break;
 		case 404: message = "Not Found";          break;
@@ -190,6 +191,99 @@ send_response(struct vmod_fsdirector_file_system *fs, struct stat *stat_buf,
 	close(fd);
 }
 
+static const char *
+absolutize_link(struct ws* ws, const char* path, const char* link)
+{
+	unsigned available, written;
+	char *front, *path_copy;
+
+	if (link[0] == '/') {
+		return link;
+	}
+
+	path_copy = (char*) WS_Copy(ws, path, -1);
+
+	if (path_copy == NULL) {
+		return NULL;
+	}
+
+	available = WS_Reserve(ws, 0);
+	front = ws->f;
+
+	written = snprintf(front, available, "%s/%s", dirname(path_copy), link);
+	written++; // null-terminating char
+
+	if (written > available) {
+		WS_Release(ws, 0);
+		return NULL;
+	}
+
+	WS_Release(ws, written);
+	return front;
+}
+
+static const char *
+normalize_link(struct vmod_fsdirector_file_system *fs, const char* link)
+{
+	char *real_path, *location;
+	unsigned root_len;
+
+	real_path = realpath(link, NULL);
+
+	if (real_path == NULL) {
+		return NULL;
+	}
+
+	root_len = strlen(fs->root);
+	if (memcmp(real_path, fs->root, root_len) || real_path[root_len] != '/') {
+		return NULL;
+	}
+
+	location = (char*) WS_Copy(fs->htc.ws, &real_path[root_len], -1);
+	free(real_path);
+
+	return location;
+}
+
+static void
+send_redirect(struct vmod_fsdirector_file_system *fs, const char *path)
+{
+	int link_buf_size;
+	char link_buf[4096]; // XXX hardcoded
+	const char *absolute_link;
+	char const *location;
+
+	link_buf_size = readlink(path, link_buf, 4096);
+
+	if(link_buf_size < 0) {
+		handle_file_error(&fs->htc, errno);
+		return;
+	}
+
+	if (link_buf[0] != '/') {
+		absolute_link = absolutize_link(fs->htc.ws, path, link_buf);
+		if (absolute_link == NULL) {
+			prepare_answer(&fs->htc, 500);
+			prepare_body(&fs->htc);
+			return;
+		}
+	}
+	else {
+		absolute_link = link_buf;
+	}
+
+	location = normalize_link(fs, absolute_link);
+	if (location == NULL) {
+		prepare_answer(&fs->htc, 500);
+		prepare_body(&fs->htc);
+		return;
+	}
+
+	prepare_answer(&fs->htc, 302);
+	dprintf(fs->htc.fd, "Location: %s\r\n", location);
+	prepare_body(&fs->htc);
+}
+
 static void
 answer_file(struct vmod_fsdirector_file_system *fs, struct stat *stat_buf,
     const char *path)
@@ -206,7 +300,7 @@ answer_file(struct vmod_fsdirector_file_system *fs, struct stat *stat_buf,
 		}
 	}
 	else if (S_ISLNK(mode)) {
-		// TODO follow link or send redirection ?
+		send_redirect(fs, path);
 	}
 	else {
 		prepare_answer(&fs->htc, 404);
@@ -234,15 +328,12 @@ answer_appropriate(struct vmod_fsdirector_file_system *fs)
 
 	url_start = &fs->htc.ws->s[4];
 	url_end = strchr(url_start, ' ');
-	url_len = url_end - url_start;
-	root_len = strlen(fs->root);
-	url = WS_Alloc(fs->htc.ws, root_len + url_len + 1);
-	memcpy(url, fs->root, root_len);
-	memcpy(&url[root_len], url_start, url_len + 1);
-	url[root_len + url_len] = '\0';
+	url_len = (url_end - url_start) + strlen(fs->root) + 1;
+	url = WS_Alloc(fs->htc.ws, url_len);
+	snprintf(url, url_len, "%s%s", fs->root, url_start);
 
 	path = url;
-	if (stat(path, &stat_buf) < 0) {
+	if (lstat(path, &stat_buf) < 0) {
 		handle_file_error(&fs->htc, errno);
 		return;
 	}

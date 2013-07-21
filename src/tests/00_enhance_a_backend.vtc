@@ -15,4 +15,3 @@ varnish v1 -vcl {
 
 varnish v1 -cliok "backend.list"
 varnish v1 -wait
-

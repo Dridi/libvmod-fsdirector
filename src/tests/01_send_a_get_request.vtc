@@ -20,4 +20,3 @@ client c1 {
 	expect resp.http.Content-Type ~ "text/plain"
 	expect resp.bodylen == 5
 } -run
-

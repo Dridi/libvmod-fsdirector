@@ -32,9 +32,9 @@
 vmod_fsdirector
 ===============
 
---------------------------
-Varnish QueryString Module
---------------------------
+-------------------------
+Varnish FileSystem Module
+-------------------------
 
 :Author: Dridi Boukelmoune
 :Date: 2013-04-25

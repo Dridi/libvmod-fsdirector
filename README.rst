@@ -44,7 +44,7 @@ Varnish QueryString Module
 SYNOPSIS
 ========
 
-..sourcecode::
+.. sourcecode::
 
    import fsdirector;
 
